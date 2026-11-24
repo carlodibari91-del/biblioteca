@@ -26,6 +26,7 @@ body{min-height:100vh}
 button,input,select,textarea{font:inherit;color:inherit}
 a{color:var(--title)}
 :focus-visible{outline:3px solid var(--primary);outline-offset:2px}
+[hidden]{display:none!important}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 
 #app{max-width:560px;margin:0 auto;padding:calc(env(safe-area-inset-top,0px) + 22px) 18px calc(118px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:16px}
@@ -123,7 +124,7 @@ dl.info dd{margin:2px 0 0;font-weight:600;overflow-wrap:anywhere}
 
 .shelf{border:5px solid var(--dark);border-radius:8px;background:var(--surface)}
 .shelf-h{display:flex;justify-content:space-between;align-items:baseline;padding:8px 10px 0;font-weight:700}
-.shelf-h span{font-size:.8rem;font-weight:500;color:var(--muted)}
+.shelf-h span{margin-left:auto;font-size:.8rem;font-weight:500;color:var(--muted)}
 .level{display:flex;align-items:flex-end;gap:10px;width:100%;min-height:68px;padding:6px 10px 0;border:0;border-bottom:5px solid var(--dark);background:none;cursor:pointer;text-align:left}
 .level:last-child{border-bottom:0}
 .level .lv{flex:none;width:64px;font-size:.78rem;font-weight:600;color:var(--muted);padding-bottom:6px}
@@ -174,6 +175,7 @@ nav.tabs a.fab{width:58px;height:58px;min-width:0;margin-top:-24px;border-radius
 </nav>
 <div class="toast" id="toast" role="status"></div>
 <input type="file" id="importfile" accept=".json,application/json" hidden>
+<input type="file" id="importlist" accept=".csv,.xlsx,.xls,.txt,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" hidden>
 <script src="app.js"></script>
 </body>
 </html>

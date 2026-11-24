@@ -33,6 +33,20 @@ const thisYear = () => new Date().getFullYear();
 const fmtDate = (iso, withYear) => iso ? new Date(iso + 'T00:00').toLocaleDateString('it-IT', withYear ? { day: 'numeric', month: 'short', year: 'numeric' } : { day: 'numeric', month: 'short' }) : '';
 const nf = (n) => Number(n).toLocaleString('it-IT', { maximumFractionDigits: 1 });
 const byTitle = (a, b) => (a.title || '').localeCompare(b.title || '', 'it', { sensitivity: 'base' });
+const fmtEnd = (e) => !e ? '' : e.length >= 10 ? fmtDate(e.slice(0, 10)) : e.length === 7 ? new Date(e + '-01T00:00').toLocaleDateString('it-IT', { month: 'short' }) : '';
+function yearOptions(sel, firstLabel) {
+  let o = firstLabel ? `<option value="" ${!sel ? 'selected' : ''}>${firstLabel}</option>` : '';
+  for (let y = thisYear(); y >= 1940; y--) o += `<option ${String(y) === sel ? 'selected' : ''}>${y}</option>`;
+  return o;
+}
+function askYear(msg) {
+  const v = prompt(msg || 'In che anno l’hai letto? Lascia vuoto se non lo ricordi.', '');
+  if (v === null) return null;
+  const y = v.trim();
+  if (!y) return '';
+  if (!/^\d{4}$/.test(y) || +y > thisYear() || +y < 1900) { toast('Scrivi l’anno con 4 cifre, per esempio 2019'); return null; }
+  return y;
+}
 const firstAuthor = (b) => (b.authors || '').split(',')[0].trim();
 
 function toast(msg) {
@@ -99,7 +113,7 @@ darkQuery.addEventListener('change', applyTheme);
 // ---------- Stato ----------
 let books = [];
 let readings = [];
-const ui = { q: '', status: 'tutti', genre: '', sort: 'titolo', place: null, addTab: 'scan', results: null, lastQ: '', draft: null, letTab: 'anno', yearFilter: 'tutti', statYear: thisYear() };
+const ui = { q: '', status: 'tutti', genre: '', sort: 'titolo', place: null, addTab: 'scan', results: null, lastQ: '', draft: null, letTab: 'anno', yearFilter: 'tutti', statYear: thisYear(), importReport: '' };
 
 const bookById = (id) => books.find((b) => b.id === id);
 const readingsOf = (id) => readings.filter((r) => r.bookId === id).sort((a, b) => (b.end || b.start || '9').localeCompare(a.end || a.start || '9'));
@@ -189,9 +203,9 @@ function viewScaffali() {
     ${Object.keys(tree[r]).sort(nat).map((s) => {
       const levels = tree[r][s];
       const tot = Object.values(levels).reduce((n, a) => n + a.length, 0);
-      return `<div class="shelf"><div class="shelf-h">${s ? 'Scaffale ' + esc(s) : 'Scaffale non indicato'}<span>${tot} ${tot === 1 ? 'libro' : 'libri'}</span></div>
+      return `<div class="shelf"><div class="shelf-h">${esc(s)}<span>${tot} ${tot === 1 ? 'libro' : 'libri'}</span></div>
         ${Object.keys(levels).sort(nat).map((l) => `<button class="level" data-act="place" data-room="${esc(r)}" data-shelf="${esc(s)}" data-level="${esc(l)}">
-          <span class="lv">${l ? 'Ripiano ' + esc(l) : 'Ripiano ?'}</span><span class="spines">${spines(levels[l])}</span><span class="n">${levels[l].length}</span></button>`).join('')}</div>`;
+          <span class="lv">${l ? 'Ripiano ' + esc(l) : ''}</span><span class="spines">${spines(levels[l])}</span><span class="n">${levels[l].length}</span></button>`).join('')}</div>`;
     }).join('')}</section>`).join('')}`;
 }
 
@@ -235,6 +249,7 @@ function viewForm(id) {
       <label class="field"><span>Tipo</span><select class="input" name="type">${TYPES.map((t) => `<option ${t === type ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
       <label class="field"><span>Stato</span><select class="input" name="status">${Object.keys(STATUSES).map((k) => `<option value="${k}" ${k === status ? 'selected' : ''}>${STATUSES[k]}</option>`).join('')}</select></label>
     </div>
+    ${isNew || !readingsOf(id).some((r) => r.end) ? `<label class="field" id="yearwrap" ${status === 'letto' ? '' : 'hidden'}><span>Anno di lettura</span><select class="input" name="readYear">${yearOptions('', 'Non lo ricordo')}</select></label>` : ''}
     <fieldset class="field" style="border:0;padding:0;margin:0"><legend style="font-size:.85rem;font-weight:600;color:var(--muted);margin-bottom:6px">Generi</legend>
       <div class="genres">${allGenres.map((g) => `<label><input type="checkbox" name="genres" value="${esc(g)}" ${(b.genres || []).includes(g) ? 'checked' : ''}><span>${esc(g)}</span></label>`).join('')}</div>
     </fieldset>
@@ -288,10 +303,11 @@ function viewLibro(id) {
   <section class="stack" style="gap:0"><h2>Letture</h2>
     ${rs.length ? rs.map((r) => `<div class="reading">
       <div class="dates">
-        <label class="field"><span>Inizio</span><input class="input" type="date" data-rid="${esc(r.id)}" data-k="start" value="${esc(r.start || '')}"></label>
-        <label class="field"><span>Fine</span><input class="input" type="date" data-rid="${esc(r.id)}" data-k="end" value="${esc(r.end || '')}"></label>
+        <label class="field"><span>Anno di lettura</span><select class="input" data-rid="${esc(r.id)}" data-k="year">${yearOptions(r.end ? r.end.slice(0, 4) : '', 'In corso')}</select></label>
+        <label class="field"><span>Finito il (facoltativo)</span><input class="input" type="date" data-rid="${esc(r.id)}" data-k="end" value="${esc(r.end && r.end.length === 10 ? r.end : '')}"></label>
         <button class="iconbtn" data-act="delreading" data-rid="${esc(r.id)}" aria-label="Elimina questa lettura">${ICON.x}</button>
       </div>
+      <label class="field"><span>Iniziato il (facoltativo)</span><input class="input" type="date" data-rid="${esc(r.id)}" data-k="start" value="${esc(r.start || '')}"></label>
       <div class="stars" role="group" aria-label="Voto">${[1, 2, 3, 4, 5].map((n) => `<button data-act="rate" data-rid="${esc(r.id)}" data-v="${n}" aria-label="${n} su 5" aria-pressed="${r.rating === n}">${n <= (r.rating || 0) ? '★' : '☆'}</button>`).join('')}</div>
     </div>`).join('') : '<p class="sub">Nessuna lettura registrata.</p>'}
   </section>
@@ -311,7 +327,7 @@ function readRow(r) {
   const b = bookById(r.bookId);
   return `<a class="row" href="#/libro/${esc(b.id)}">${coverHTML(b, 'sm')}
     <div class="meta"><span class="t">${esc(b.title)}${b.volume ? ' ' + esc(b.volume) : ''}</span><span class="a">${esc(b.authors || '')}</span></div>
-    <div class="right"><span>${r.end ? fmtDate(r.end) : 'dal ' + fmtDate(r.start)}</span>${r.rating ? `<span class="stars ro" aria-label="Voto ${r.rating} su 5">${starsText(r.rating)}</span>` : ''}</div></a>`;
+    <div class="right"><span>${r.end ? fmtEnd(r.end) : (r.start ? 'dal ' + fmtDate(r.start) : 'in corso')}</span>${r.rating ? `<span class="stars ro" aria-label="Voto ${r.rating} su 5">${starsText(r.rating)}</span>` : ''}</div></a>`;
 }
 function perAnnoHTML() {
   const current = readings.filter((r) => !r.end && bookById(r.bookId));
@@ -339,9 +355,10 @@ function statsHTML() {
   const pages = cur.reduce((n, r) => n + (+bk(r).pages || 0), 0);
   const rated = cur.filter((r) => r.rating);
   const avg = rated.length ? rated.reduce((n, r) => n + r.rating, 0) / rated.length : 0;
-  const durations = cur.filter((r) => r.start && r.end >= r.start).map((r) => (new Date(r.end) - new Date(r.start)) / 864e5 + 1);
+  const durations = cur.filter((r) => r.start && r.end.length === 10 && r.end >= r.start).map((r) => (new Date(r.end) - new Date(r.start)) / 864e5 + 1);
   const avgDays = durations.length ? durations.reduce((a, b) => a + b, 0) / durations.length : 0;
-  const months = MONTHS.map((_, i) => cur.filter((r) => +r.end.slice(5, 7) === i + 1).length);
+  const months = MONTHS.map((_, i) => cur.filter((r) => r.end.length >= 7 && +r.end.slice(5, 7) === i + 1).length);
+  const noMonth = cur.filter((r) => r.end.length < 7).length;
   const mMax = Math.max(1, ...months);
   const count = (fn) => { const m = {}; cur.forEach((r) => [].concat(fn(bk(r))).filter(Boolean).forEach((k) => { m[k] = (m[k] || 0) + 1; })); return Object.entries(m).sort((a, b) => b[1] - a[1]); };
   const genres = count((b) => b.genres || []).slice(0, 6);
@@ -364,7 +381,7 @@ function statsHTML() {
   </div>
   ${goal ? `<div class="goal">${ringSVG(cur.length / goal)}<div class="stack" style="gap:2px"><span style="font-size:.85rem;font-weight:600">Obiettivo ${Y}</span><span style="font-size:1.35rem;font-weight:700">${cur.length} di ${goal} libri</span>${projection !== null ? `<span style="font-size:.85rem;opacity:.9">A questo ritmo arrivi a ${projection} entro il 31 dicembre</span>` : ''}</div></div>` : ''}
   <div class="card"><h2>Libri finiti per mese</h2>
-    <div class="months" role="img" aria-label="Libri finiti per mese nel ${Y}: ${months.join(', ')}">${months.map((v, i) => `<div><b>${v || ''}</b><i style="height:${Math.max(v / mMax * 80, 3)}px;${v ? '' : 'background:var(--track)'}"></i><span>${MONTHS[i]}</span></div>`).join('')}</div></div>
+    <div class="months" role="img" aria-label="Libri finiti per mese nel ${Y}: ${months.join(', ')}">${months.map((v, i) => `<div><b>${v || ''}</b><i style="height:${Math.max(v / mMax * 80, 3)}px;${v ? '' : 'background:var(--track)'}"></i><span>${MONTHS[i]}</span></div>`).join('')}</div>${noMonth ? `<p class="sub" style="margin:0">${noMonth === 1 ? '1 libro letto' : noMonth + ' libri letti'} senza la data di fine non ${noMonth === 1 ? 'compare' : 'compaiono'} nel grafico.</p>` : ''}</div>
   ${genres.length ? `<div class="card"><h2>Generi</h2>${genres.map(([g, v], i) => `<div class="hrow"><span>${esc(g)}</span><div class="hbar"><i style="width:${v / genres[0][1] * 100}%;${i === 0 ? 'background:var(--primary)' : ''}"></i></div><b style="text-align:right">${v}</b></div>`).join('')}</div>` : ''}
   ${types.length ? `<div class="card"><h2>Tipo di lettura</h2>
     <div class="stackbar" role="img" aria-label="${types.map(([t, v]) => t + ' ' + v).join(', ')}">${types.map(([t, v], i) => `<i style="flex:${v};background:${typeColors[i % 6]}"></i>`).join('')}</div>
@@ -385,6 +402,11 @@ function viewDati() {
     <button class="btn block" data-act="export-json">Scarica backup completo (JSON)</button>
     <div class="btnrow"><button class="btn quiet" data-act="export-csv">Tabella per Excel (CSV)</button><button class="btn quiet" data-act="export-txt">Riepilogo letture (TXT)</button></div>
     <button class="btn ghost block" data-act="import">Ripristina da un backup</button>
+  </section>
+  <section class="stack"><h2>Importa un elenco di libri</h2>
+    <p class="sub" style="margin:0">Compila il modello in Excel o Google Fogli, poi importalo qui come file .xlsx o .csv. Se una riga ha solo l’ISBN, l’app cerca titolo e autore online.</p>
+    <div class="btnrow"><button class="btn" data-act="importlist">Importa elenco</button><button class="btn quiet" data-act="template">Scarica il modello</button></div>
+    <p class="sub" id="importmsg" style="margin:0">${esc(ui.importReport || '')}</p>
   </section>
   <section class="stack"><h2>Obiettivo di lettura annuale</h2>
     <div class="inline"><label class="sr" for="goal">Libri all’anno</label><input class="input" id="goal" type="number" min="0" max="999" inputmode="numeric" value="${esc(settings.goal)}"><span style="align-self:center;color:var(--muted)">libri all’anno</span></div>
@@ -561,7 +583,11 @@ async function saveBook(form) {
   await DB.put('books', b);
   if (old) Object.assign(old, b); else books.push(b);
   if (!old && b.status === 'in-lettura') await addReading({ bookId: id, start: today(), end: '' });
-  if (!old && b.status === 'letto') await addReading({ bookId: id, start: '', end: today() });
+  const ry = get('readYear');
+  if (b.status === 'letto' && ry && !readingsOf(id).some((r) => r.end)) {
+    const open = readingsOf(id).find((r) => !r.end);
+    if (open) { open.end = ry; await DB.put('readings', open); } else await addReading({ bookId: id, start: '', end: ry });
+  }
   ui.draft = null;
   toast(old ? 'Modifiche salvate' : 'Libro aggiunto');
   location.replace('#/libro/' + id);
@@ -580,17 +606,151 @@ function exportJSON() {
   download(`biblioteca-backup-${today()}.json`, JSON.stringify({ app: 'la-mia-biblioteca', version: 1, exportedAt: new Date().toISOString(), settings: Object.assign({}, settings, { googleKey: undefined }), books, readings }, null, 1), 'application/json');
   settings.lastBackup = today(); saveSettings(); render(); toast('Backup scaricato nella cartella Download');
 }
+const LIST_COLS = ['Titolo', 'Autori', 'ISBN', 'Tipo', 'Generi', 'Stato', 'Anno di lettura', 'Voto', 'Stanza', 'Scaffale', 'Ripiano', 'Mio', 'Prestato a', 'Serie', 'Volume', 'Editore', 'Anno pubblicazione', 'Pagine', 'Note'];
+const csvQ = (v) => '"' + String(v ?? '').replace(/"/g, '""') + '"';
 function exportCSV() {
-  const cols = ['Titolo', 'Autori', 'Tipo', 'Generi', 'Stato', 'Stanza', 'Scaffale', 'Ripiano', 'Prestato a', 'Mio', 'Serie', 'Volume', 'ISBN', 'Editore', 'Anno', 'Pagine', 'Aggiunto il', 'Letto nel', 'Voto', 'Note'];
-  const q = (v) => '"' + String(v ?? '').replace(/"/g, '""') + '"';
+  const cols = [...LIST_COLS, 'Aggiunto il'];
   const rows = books.slice().sort(byTitle).map((b) => {
-    const rs = readingsOf(b.id).filter((r) => r.end);
-    const rated = rs.filter((r) => r.rating);
-    return [b.title, b.authors, b.type, (b.genres || []).join(', '), STATUSES[b.status], b.room, b.shelf, b.level, b.lentTo, b.owned === false ? 'no' : 'sì', b.series, b.volume, b.isbn, b.publisher, b.year, b.pages, b.addedAt,
-      rs.map((r) => r.end.slice(0, 4)).join(', '), rated.length ? nf(rated.reduce((n, r) => n + r.rating, 0) / rated.length) : '', b.notes].map(q).join(';');
+    const rs = readingsOf(b.id).filter((r) => r.end).reverse();
+    const lastRated = rs.filter((r) => r.rating).pop();
+    return [b.title, b.authors, b.isbn, b.type, (b.genres || []).join(', '), STATUSES[b.status], rs.map((r) => r.end).join(', '), lastRated ? lastRated.rating : '',
+      b.room, b.shelf, b.level, b.owned === false ? 'no' : 'sì', b.lentTo, b.series, b.volume, b.publisher, b.year, b.pages, b.notes, b.addedAt].map(csvQ).join(';');
   });
-  download(`biblioteca-${today()}.csv`, '\ufeff' + [cols.map(q).join(';'), ...rows].join('\r\n'), 'text/csv;charset=utf-8');
+  download(`biblioteca-${today()}.csv`, '\ufeff' + [cols.map(csvQ).join(';'), ...rows].join('\r\n'), 'text/csv;charset=utf-8');
   toast('Tabella scaricata nella cartella Download');
+}
+function downloadTemplate() {
+  const example = ['Il nome della rosa', 'Umberto Eco', '', 'Romanzo', 'Giallo, Storico', 'Letto', '2019', '5', 'Soggiorno', 'B', '2', 'sì', '', '', '', 'Bompiani', '1980', '', 'ESEMPIO: cancella questa riga'];
+  download('modello-biblioteca.csv', '\ufeff' + [LIST_COLS.map(csvQ).join(';'), example.map(csvQ).join(';')].join('\r\n'), 'text/csv;charset=utf-8');
+  toast('Modello scaricato nella cartella Download');
+}
+
+// ---------- Importazione elenco (CSV / Excel) ----------
+const normKey = (v) => String(v ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+const HEADER_MAP = { titolo: 'title', autori: 'authors', autore: 'authors', isbn: 'isbn', tipo: 'type', generi: 'genres', genere: 'genres', stato: 'status',
+  annodilettura: 'readYears', annolettura: 'readYears', lettonel: 'readYears', voto: 'rating', stanza: 'room', scaffale: 'shelf', ripiano: 'level', mio: 'owned',
+  prestatoa: 'lentTo', serie: 'series', volume: 'volume', editore: 'publisher', annopubblicazione: 'year', anno: 'year', pagine: 'pages', note: 'notes', aggiuntoil: 'addedAt' };
+const STATUS_IN = { daleggere: 'da-leggere', inlettura: 'in-lettura', letto: 'letto', letti: 'letto', prestato: 'prestato' };
+const cellStr = (v) => v === null || v === undefined ? '' : typeof v === 'number' ? String(v) : String(v).trim();
+function parseCSV(text) {
+  text = text.replace(/^\ufeff/, '');
+  const first = text.split(/\r?\n/)[0];
+  const delim = [';', ',', '\t'].sort((a, b) => first.split(b).length - first.split(a).length)[0];
+  const rows = []; let row = [], cell = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += c; }
+    else if (c === '"') q = true;
+    else if (c === delim) { row.push(cell); cell = ''; }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; row.push(cell); rows.push(row); row = []; cell = ''; }
+    else cell += c;
+  }
+  if (cell !== '' || row.length) { row.push(cell); rows.push(row); }
+  return rows;
+}
+function loadScript(src) {
+  return new Promise((res, rej) => { const el = document.createElement('script'); el.src = src; el.onload = res; el.onerror = () => rej(new Error('script')); document.head.appendChild(el); });
+}
+async function readXlsx(file) {
+  if (!window.XLSX) await loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+  const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+  const name = wb.SheetNames.find((n) => normKey(n) === 'libri') || wb.SheetNames[0];
+  return XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: '' });
+}
+function normEnd(v) {
+  if (typeof v === 'number') {
+    if (v >= 1900 && v <= 2100) return String(Math.trunc(v));
+    if (v > 20000 && v < 80000) return new Date(Math.round((v - 25569) * 864e5)).toISOString().slice(0, 10);
+    return '';
+  }
+  const s = String(v || '').trim(); let m;
+  if (/^\d{4}$/.test(s)) return s;
+  if (/^\d{4}-\d{2}(-\d{2})?$/.test(s)) return s;
+  if ((m = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/))) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  if ((m = s.match(/^(\d{1,2})[\/.-](\d{4})$/))) return `${m[2]}-${m[1].padStart(2, '0')}`;
+  return '';
+}
+const splitEnds = (v) => typeof v === 'number' ? [normEnd(v)].filter(Boolean) : String(v || '').split(/[,;]+/).map((x) => normEnd(x)).filter(Boolean);
+function rowsToRecords(rows) {
+  const hi = rows.findIndex((r) => r.some((c) => ['titolo', 'isbn'].includes(normKey(c))));
+  if (hi < 0) throw new Error('header');
+  const keys = rows[hi].map((h) => HEADER_MAP[normKey(h)] || null);
+  const list = []; let empty = 0;
+  for (const r of rows.slice(hi + 1)) {
+    const o = {};
+    keys.forEach((k, i) => { if (k && o[k] === undefined) o[k] = r[i]; });
+    if (/^esempio/i.test(cellStr(o.notes))) continue;
+    if (!cellStr(o.title) && !cellStr(o.isbn)) { if (r.some((c) => cellStr(c))) empty++; continue; }
+    list.push(o);
+  }
+  return { list, empty };
+}
+function recordToBook(o) {
+  const s = (k) => cellStr(o[k]);
+  const typeIn = TYPES.find((t) => normKey(t) === normKey(s('type')));
+  const genres = s('genres').split(/[,;\/]+/).map((g) => g.trim()).filter(Boolean)
+    .map((g) => GENRES.find((x) => normKey(x) === normKey(g)) || g.charAt(0).toUpperCase() + g.slice(1));
+  const ends = splitEnds(o.readYears).sort();
+  const status = STATUS_IN[normKey(s('status'))] || (ends.length ? 'letto' : 'da-leggere');
+  let isbn = s('isbn');
+  if (typeof o.isbn === 'number') isbn = o.isbn.toFixed(0);
+  const b = { id: uid(), title: s('title'), authors: s('authors'), isbn: cleanIsbn(isbn), type: typeIn || (s('type') ? 'Altro' : ''), genres: [...new Set(genres)],
+    status, room: s('room'), shelf: s('shelf'), level: s('level'), owned: !/^(no|n|false|0)$/i.test(s('owned')), lentTo: s('lentTo'), series: s('series'),
+    volume: s('volume'), publisher: s('publisher'), year: s('year'), pages: parseInt(s('pages'), 10) || '', notes: s('notes'), cover: '', addedAt: normEnd(o.addedAt).length === 10 ? normEnd(o.addedAt) : today() };
+  const rating = Math.min(5, Math.max(0, parseInt(s('rating'), 10) || 0));
+  const reads = ends.map((end, i) => ({ id: uid(), bookId: b.id, start: '', end, rating: i === ends.length - 1 ? rating : 0 }));
+  if (status === 'in-lettura') reads.push({ id: uid(), bookId: b.id, start: '', end: '', rating: 0 });
+  return { b, reads };
+}
+async function importList(file) {
+  const say = (t) => { ui.importReport = t; const el = $('#importmsg'); if (el) el.textContent = t; };
+  say('Leggo il file…');
+  let rows;
+  try { rows = /\.xlsx?$/i.test(file.name) ? await readXlsx(file) : parseCSV(await file.text()); }
+  catch (e) { say(e.message === 'script' ? 'Per leggere i file Excel serve la connessione. Riprova online oppure salva il file come CSV.' : 'Non riesco a leggere il file: usa il modello in formato .xlsx o .csv.'); return; }
+  let parsed;
+  try { parsed = rowsToRecords(rows); } catch (e) { say('Non trovo l’intestazione: la prima riga deve contenere almeno le colonne «Titolo» o «ISBN».'); return; }
+  const keyOf = (t, a) => normKey(t) + '|' + normKey(String(a || '').split(',')[0]);
+  const isbns = new Set(books.map((b) => cleanIsbn(b.isbn)).filter(Boolean));
+  const keys = new Set(books.map((b) => keyOf(b.title, b.authors)));
+  const fresh = []; let dups = 0;
+  for (const o of parsed.list) {
+    const { b, reads } = recordToBook(o);
+    const k = keyOf(b.title, b.authors);
+    if ((b.isbn && isbns.has(b.isbn)) || (b.title && keys.has(k))) { dups++; continue; }
+    if (b.isbn) isbns.add(b.isbn);
+    if (b.title) keys.add(k);
+    fresh.push({ b, reads });
+  }
+  if (!fresh.length) { say('Nessun libro nuovo da importare' + (dups ? `: ${dups} erano già presenti.` : '.')); return; }
+  const toLookup = fresh.filter((x) => !x.b.title).length;
+  const ok = confirm(`Trovati ${fresh.length} libri nuovi da importare.` + (dups ? `\n${dups} già presenti verranno saltati.` : '') +
+    (parsed.empty ? `\n${parsed.empty} righe senza titolo né ISBN verranno ignorate.` : '') +
+    (toLookup ? `\n${toLookup} hanno solo l’ISBN: cercherò titolo e autore online.` : '') + '\n\nProcedo?');
+  if (!ok) { say(''); return; }
+  let found = 0, missing = 0;
+  for (let i = 0; i < fresh.length; i++) {
+    const { b } = fresh[i];
+    if (!b.title) {
+      say(`Cerco online i dati: ${i + 1} di ${fresh.length}…`);
+      const d = navigator.onLine ? await lookupISBN(b.isbn) : null;
+      if (d) {
+        found++;
+        for (const k of ['title', 'authors', 'publisher', 'year', 'pages', 'cover']) if (!b[k] && d[k]) b[k] = d[k];
+        if (!b.genres.length) b.genres = d.genres || [];
+        if (!b.type) b.type = d.type;
+        await new Promise((r) => setTimeout(r, 120));
+      } else { missing++; b.title = 'ISBN ' + b.isbn; }
+    }
+    if (!b.type) b.type = 'Romanzo';
+    if (!b.cover && b.isbn) b.cover = `https://covers.openlibrary.org/b/isbn/${b.isbn}-M.jpg?default=false`;
+  }
+  const nb = fresh.map((x) => x.b), nr = fresh.flatMap((x) => x.reads);
+  await DB.putMany('books', nb); await DB.putMany('readings', nr);
+  books.push(...nb); readings.push(...nr);
+  say(`Importat${nb.length === 1 ? 'o 1 libro' : 'i ' + nb.length + ' libri'}` + (nr.length ? ` e ${nr.length === 1 ? '1 lettura' : nr.length + ' letture'}` : '') + '.' + (dups ? ` ${dups} già presenti saltati.` : '') +
+    (toLookup ? ` Dati trovati online per ${found} ISBN` + (missing ? `; ${missing} non trovati: li vedi in biblioteca con il titolo «ISBN …», da completare a mano.` : '.') : ''));
+  toast('Importazione completata');
 }
 function exportTXT() {
   const fin = finished();
@@ -601,7 +761,8 @@ function exportTXT() {
     out += `\n${y} — ${list.length} ${list.length === 1 ? 'libro' : 'libri'}\n`;
     for (const r of list) {
       const b = bookById(r.bookId);
-      out += `  ${r.end.slice(8, 10)}/${r.end.slice(5, 7)}  ${b.title}${b.volume ? ' ' + b.volume : ''}${b.authors ? ' — ' + b.authors : ''}${r.rating ? '  ' + starsText(r.rating) : ''}\n`;
+      const when = r.end.length === 10 ? `${r.end.slice(8, 10)}/${r.end.slice(5, 7)}` : r.end.length === 7 ? `   ${r.end.slice(5, 7)}` : '     ';
+      out += `  ${when}  ${b.title}${b.volume ? ' ' + b.volume : ''}${b.authors ? ' — ' + b.authors : ''}${r.rating ? '  ' + starsText(r.rating) : ''}\n`;
     }
   }
   if (!years.length) out += '\nNessuna lettura completata.\n';
@@ -638,6 +799,11 @@ document.addEventListener('click', async (e) => {
       location.hash = '#/nuovo'; } break;
     case 'cancel': case 'back': history.length > 1 ? history.back() : (location.hash = '#/libreria'); break;
     case 'setstatus':
+      if (d.v === 'letto' && b.status !== 'letto' && !readingsOf(b.id).some((r) => r.end)) {
+        const y = askYear();
+        if (y === null) break;
+        if (y) { const open = readingsOf(b.id).find((r) => !r.end); if (open) { open.end = y; await DB.put('readings', open); } else await addReading({ bookId: b.id, start: '', end: y }); }
+      }
       if (d.v === 'prestato') { const who = prompt('A chi l’hai prestato?', b.lentTo || ''); if (who === null) break; b.lentTo = who.trim(); }
       await setStatus(b, d.v); render(); break;
     case 'start': await addReading({ bookId: b.id, start: today(), end: '' }); await setStatus(b, 'in-lettura'); toast('Buona lettura'); render(); break;
@@ -647,7 +813,13 @@ document.addEventListener('click', async (e) => {
       if (b.status !== 'prestato') await setStatus(b, 'letto');
       toast('Segnato come letto: dagli un voto qui sotto'); render(); break;
     }
-    case 'pastreading': await addReading({ bookId: b.id, start: '', end: today() }); if (b.status === 'da-leggere') await setStatus(b, 'letto'); toast('Lettura aggiunta: correggi le date qui sotto'); render(); break;
+    case 'pastreading': {
+      const y = askYear('In che anno l’hai letto?');
+      if (!y) break;
+      await addReading({ bookId: b.id, start: '', end: y });
+      if (b.status === 'da-leggere') await setStatus(b, 'letto');
+      toast('Lettura del ' + y + ' aggiunta'); render(); break;
+    }
     case 'rate': { const r = readings.find((x) => x.id === d.rid); r.rating = r.rating === +d.v ? 0 : +d.v; await DB.put('readings', r); render(); break; }
     case 'delreading':
       if (!confirm('Eliminare questa lettura?')) break;
@@ -665,6 +837,8 @@ document.addEventListener('click', async (e) => {
     case 'export-csv': exportCSV(); break;
     case 'export-txt': exportTXT(); break;
     case 'import': $('#importfile').click(); break;
+    case 'importlist': $('#importlist').click(); break;
+    case 'template': downloadTemplate(); break;
     case 'palette': settings.palette = d.v; if (settings.mode === 'scura' && d.v !== 'notte') settings.mode = 'chiara'; saveSettings(); applyTheme(); render(); break;
     case 'mode': settings.mode = d.v; saveSettings(); applyTheme(); render(); break;
     case 'togglekey': { const i = $('#gkey'); const show = i.type === 'password'; i.type = show ? 'text' : 'password'; el.textContent = show ? 'Nascondi' : 'Mostra'; break; }
@@ -699,12 +873,18 @@ document.addEventListener('change', async (e) => {
   else if (t.id === 'sort') { ui.sort = t.value; $('#list').innerHTML = listHTML(); }
   else if (t.id === 'goal') { settings.goal = Math.max(0, parseInt(t.value, 10) || 0); saveSettings(); toast('Obiettivo salvato'); }
   else if (t.id === 'importfile' && t.files[0]) { await importFile(t.files[0]); t.value = ''; }
+  else if (t.id === 'importlist' && t.files[0]) { const f = t.files[0]; t.value = ''; await importList(f); }
+  else if (t.name === 'status' && t.form && t.form.getAttribute('id') === 'bookform') { const w = $('#yearwrap'); if (w) w.hidden = t.value !== 'letto'; }
   else if (t.dataset.rid && t.dataset.k) {
     const r = readings.find((x) => x.id === t.dataset.rid);
-    r[t.dataset.k] = t.value; await DB.put('readings', r);
+    const k = t.dataset.k;
+    if (k === 'year') r.end = t.value ? (r.end && r.end.startsWith(t.value) ? r.end : t.value) : '';
+    else if (k === 'end') r.end = t.value || (r.end ? r.end.slice(0, 4) : '');
+    else r.start = t.value;
+    await DB.put('readings', r);
     const b = bookById(r.bookId);
-    if (t.dataset.k === 'end' && t.value && b.status === 'in-lettura' && !readingsOf(b.id).some((x) => !x.end)) { await setStatus(b, 'letto'); render(); }
-    toast('Date salvate');
+    if (r.end && b.status === 'in-lettura' && !readingsOf(b.id).some((x) => !x.end)) await setStatus(b, 'letto');
+    toast('Lettura aggiornata'); render();
   }
 });
 document.addEventListener('submit', async (e) => {
