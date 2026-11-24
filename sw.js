@@ -1,6 +1,6 @@
 // Service worker: fa funzionare l'app anche senza connessione.
 // Quando modifichi i file dell'app, aumenta il numero di VERSION.
-const VERSION = 'biblioteca-v1';
+const VERSION = 'biblioteca-v3';
 const IMG_CACHE = 'biblioteca-immagini';
 const SHELL = [
   './',

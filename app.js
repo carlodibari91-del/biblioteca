@@ -81,7 +81,7 @@ const DB = {
 
 // ---------- Impostazioni ----------
 const SETTINGS_KEY = 'biblioteca-impostazioni';
-let settings = { palette: 'bordeaux', mode: 'auto', goal: 24, lastBackup: '' };
+let settings = { palette: 'bordeaux', mode: 'auto', goal: 24, lastBackup: '', googleKey: '' };
 try { Object.assign(settings, JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')); } catch (e) { /* prima apertura */ }
 function saveSettings() { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) { /* spazio esaurito */ } }
 
@@ -389,6 +389,12 @@ function viewDati() {
   <section class="stack"><h2>Obiettivo di lettura annuale</h2>
     <div class="inline"><label class="sr" for="goal">Libri all’anno</label><input class="input" id="goal" type="number" min="0" max="999" inputmode="numeric" value="${esc(settings.goal)}"><span style="align-self:center;color:var(--muted)">libri all’anno</span></div>
   </section>
+  <section class="stack"><h2>Chiave Google Books (facoltativa)</h2>
+    <p class="sub" style="margin:0">Rende più affidabili la ricerca e la scansione. Resta salvata solo su questo telefono e non viene inclusa nei backup.</p>
+    <div class="inline"><label class="sr" for="gkey">Chiave API di Google Books</label><input class="input" id="gkey" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Incolla qui la chiave" value="${esc(settings.googleKey)}"><button class="btn quiet" data-act="togglekey">Mostra</button></div>
+    <div class="btnrow"><button class="btn" data-act="savekey">Salva chiave</button><button class="btn ghost" data-act="testkey">Prova la chiave</button></div>
+    <p class="sub" id="keymsg" style="margin:0">${settings.googleKey ? 'Chiave salvata: viene usata in ogni ricerca.' : 'Nessuna chiave: la ricerca funziona comunque, con i limiti di Google.'}</p>
+  </section>
   <section class="stack"><h2>Palette colori</h2>
     ${Object.entries(PALETTES).map(([k, p]) => `<button class="palette" data-act="palette" data-v="${k}" aria-pressed="${settings.palette === k}">
       <span class="dots"><i style="background:${p.primary}"></i><i style="background:${p.dark}"></i><i style="background:${p.accent}"></i><i style="background:${p.bg}"></i></span>
@@ -420,6 +426,7 @@ function render() {
 window.addEventListener('hashchange', () => { render(); window.scrollTo(0, 0); });
 
 // ---------- Ricerca online ----------
+const gKey = () => settings.googleKey ? '&key=' + encodeURIComponent(settings.googleKey) : '';
 const GENRE_MAP = [[/mystery|detective|crime|giall|polizies/i, 'Giallo'], [/thriller|suspense/i, 'Thriller'], [/noir/i, 'Noir'], [/fantasy/i, 'Fantasy'],
   [/science fiction|fantascienza|sci-fi/i, 'Fantascienza'], [/horror/i, 'Horror'], [/histor|storic/i, 'Storico'], [/romance|love stor/i, 'Rosa'],
   [/classic/i, 'Classico'], [/adventure|avventur/i, 'Avventura'], [/humor|umoris/i, 'Umoristico'], [/biograph|autobiograph/i, 'Biografia'],
@@ -445,7 +452,7 @@ function fromGoogle(item) {
 }
 async function lookupISBN(isbn) {
   try {
-    const r = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`);
+    const r = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&country=IT${gKey()}`);
     if (r.ok) { const j = await r.json(); if (j.items && j.items.length) { const d = fromGoogle(j.items[0]); d.isbn = isbn; return d; } }
   } catch (e) { /* prova Open Library */ }
   try {
@@ -462,10 +469,30 @@ async function lookupISBN(isbn) {
   return null;
 }
 async function searchBooks(q) {
-  const r = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&maxResults=20&printType=books`);
-  if (!r.ok) throw new Error('rete');
-  const j = await r.json();
-  return (j.items || []).map(fromGoogle);
+  let list = [], failures = 0;
+  try {
+    const r = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&maxResults=20&printType=books&country=IT${gKey()}`);
+    if (r.ok) list = ((await r.json()).items || []).map(fromGoogle); else failures++;
+  } catch (e) { failures++; }
+  if (list.length < 3) {
+    try {
+      const r = await fetch(`https://openlibrary.org/search.json?q=${encodeURIComponent(q)}&limit=20&fields=title,author_name,isbn,publisher,first_publish_year,cover_i,subject,number_of_pages_median`);
+      if (r.ok) {
+        const seen = new Set(list.map((d) => (d.title + d.authors).toLowerCase()));
+        ((await r.json()).docs || []).map(fromOpenLibrary).forEach((d) => { const k = (d.title + d.authors).toLowerCase(); if (!seen.has(k)) { seen.add(k); list.push(d); } });
+      } else failures++;
+    } catch (e) { failures++; }
+  }
+  if (!list.length && failures === 2) throw new Error('rete');
+  return list;
+}
+function fromOpenLibrary(doc) {
+  const isbns = doc.isbn || [];
+  const isbn = isbns.find((x) => x.length === 13 && /^97[89]/.test(x)) || isbns[0] || '';
+  const subj = (doc.subject || []).slice(0, 30);
+  return { title: doc.title || '', authors: (doc.author_name || []).join(', '), publisher: (doc.publisher || [])[0] || '', year: doc.first_publish_year ? String(doc.first_publish_year) : '',
+    pages: doc.number_of_pages_median || '', isbn, cover: doc.cover_i ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg` : '',
+    genres: suggestGenres(subj), type: suggestType(subj, doc.title), fromApi: true };
 }
 function cleanIsbn(s) { return String(s || '').replace(/[^0-9Xx]/g, '').toUpperCase(); }
 async function handleIsbn(isbn) {
@@ -550,7 +577,7 @@ function download(name, text, mime) {
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 function exportJSON() {
-  download(`biblioteca-backup-${today()}.json`, JSON.stringify({ app: 'la-mia-biblioteca', version: 1, exportedAt: new Date().toISOString(), settings, books, readings }, null, 1), 'application/json');
+  download(`biblioteca-backup-${today()}.json`, JSON.stringify({ app: 'la-mia-biblioteca', version: 1, exportedAt: new Date().toISOString(), settings: Object.assign({}, settings, { googleKey: undefined }), books, readings }, null, 1), 'application/json');
   settings.lastBackup = today(); saveSettings(); render(); toast('Backup scaricato nella cartella Download');
 }
 function exportCSV() {
@@ -589,7 +616,7 @@ async function importFile(file) {
   if (!replace && !confirm('Unire il backup ai dati attuali? I libri già presenti vengono aggiornati.')) return;
   if (replace) { await DB.clear('books'); await DB.clear('readings'); }
   await DB.putMany('books', data.books); await DB.putMany('readings', data.readings);
-  if (data.settings && replace) { Object.assign(settings, data.settings); saveSettings(); applyTheme(); }
+  if (data.settings && replace) { const keep = settings.googleKey; Object.assign(settings, data.settings); settings.googleKey = keep; saveSettings(); applyTheme(); }
   books = await DB.all('books'); readings = await DB.all('readings');
   toast('Backup ripristinato'); render();
 }
@@ -640,6 +667,22 @@ document.addEventListener('click', async (e) => {
     case 'import': $('#importfile').click(); break;
     case 'palette': settings.palette = d.v; if (settings.mode === 'scura' && d.v !== 'notte') settings.mode = 'chiara'; saveSettings(); applyTheme(); render(); break;
     case 'mode': settings.mode = d.v; saveSettings(); applyTheme(); render(); break;
+    case 'togglekey': { const i = $('#gkey'); const show = i.type === 'password'; i.type = show ? 'text' : 'password'; el.textContent = show ? 'Nascondi' : 'Mostra'; break; }
+    case 'savekey': settings.googleKey = $('#gkey').value.trim(); saveSettings(); toast(settings.googleKey ? 'Chiave salvata' : 'Chiave rimossa'); render(); break;
+    case 'testkey': {
+      const key = $('#gkey').value.trim(), msg = $('#keymsg');
+      if (!key) { msg.textContent = 'Incolla prima la chiave.'; break; }
+      msg.textContent = 'Provo la chiave…';
+      try {
+        const r = await fetch(`https://www.googleapis.com/books/v1/volumes?q=calvino&maxResults=5&country=IT&key=${encodeURIComponent(key)}`);
+        const j = await r.json().catch(() => ({}));
+        if (r.ok) msg.textContent = `La chiave funziona: Google ha risposto con ${j.totalItems || 0} risultati. Premi «Salva chiave».`;
+        else if (r.status === 400) msg.textContent = 'Chiave non valida: controlla di averla copiata per intero.';
+        else if (r.status === 429) msg.textContent = 'La chiave è valida ma il limite giornaliero è stato superato. Riprova domani.';
+        else msg.textContent = 'Google ha rifiutato la chiave (' + r.status + '): ' + ((j.error && j.error.message) || 'controlla che la Books API sia attiva e che il sito sia tra quelli autorizzati.');
+      } catch (e) { msg.textContent = 'Nessuna risposta da Google: controlla la connessione.'; }
+      break;
+    }
     case 'wipe':
       if (!confirm('Cancellare tutti i libri e le letture da questo telefono?')) break;
       if (!confirm('Sicuro? Senza un backup i dati non si possono recuperare.')) break;
@@ -675,7 +718,7 @@ document.addEventListener('submit', async (e) => {
     ui.lastQ = q;
     const box = $('#results'); box.innerHTML = '<p class="sub">Cerco…</p>';
     try { ui.results = await searchBooks(q); box.innerHTML = resultsHTML(ui.results); }
-    catch (err) { box.innerHTML = '<p class="sub">Ricerca non riuscita: controlla la connessione e riprova.</p>'; }
+    catch (err) { box.innerHTML = '<p class="sub">Ricerca non riuscita: i servizi dei libri non rispondono. Controlla la connessione e riprova tra poco, oppure inserisci il libro a mano.</p>'; }
   }
 });
 
