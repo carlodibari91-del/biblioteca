@@ -2,7 +2,7 @@
 /* La mia Biblioteca — PWA. Tutti i dati restano sul telefono (IndexedDB). */
 
 // ---------- Costanti ----------
-const GENRES = ['Giallo', 'Thriller', 'Noir', 'Fantasy', 'Fantascienza', 'Horror', 'Storico', 'Rosa', 'Classico',
+const GENRES = ['Narrativa', 'Giallo', 'Thriller', 'Noir', 'Fantasy', 'Fantascienza', 'Horror', 'Storico', 'Rosa', 'Classico',
   'Avventura', 'Umoristico', 'Biografia', 'Saggio', 'Poesia', 'Ragazzi'];
 const TYPES = ['Romanzo', 'Saggio', 'Fumetto', 'Manga', 'Graphic novel', 'Poesia', 'Altro'];
 const STATUSES = { 'da-leggere': 'Da leggere', 'in-lettura': 'In lettura', 'letto': 'Letto', 'prestato': 'Prestato' };
@@ -36,7 +36,8 @@ const byTitle = (a, b) => (a.title || '').localeCompare(b.title || '', 'it', { s
 const fmtEnd = (e) => !e ? '' : e.length >= 10 ? fmtDate(e.slice(0, 10)) : e.length === 7 ? new Date(e + '-01T00:00').toLocaleDateString('it-IT', { month: 'short' }) : '';
 function yearOptions(sel, firstLabel) {
   let o = firstLabel ? `<option value="" ${!sel ? 'selected' : ''}>${firstLabel}</option>` : '';
-  for (let y = thisYear(); y >= 1940; y--) o += `<option ${String(y) === sel ? 'selected' : ''}>${y}</option>`;
+  for (let y = thisYear(); y >= 2020; y--) o += `<option ${String(y) === sel ? 'selected' : ''}>${y}</option>`;
+  if (sel && +sel < 2020) o += `<option selected>${sel}</option>`;
   return o;
 }
 function askYear(msg) {
@@ -113,7 +114,7 @@ darkQuery.addEventListener('change', applyTheme);
 // ---------- Stato ----------
 let books = [];
 let readings = [];
-const ui = { q: '', status: 'tutti', genre: '', sort: 'titolo', place: null, addTab: 'scan', results: null, lastQ: '', draft: null, letTab: 'anno', yearFilter: 'tutti', statYear: thisYear(), importReport: '' };
+const ui = { q: '', status: 'tutti', genre: '', sort: 'titolo', place: null, addTab: 'scan', results: null, lastQ: '', draft: null, letTab: 'anno', yearFilter: 'tutti', statYear: thisYear(), importReport: '', search: null };
 
 const bookById = (id) => books.find((b) => b.id === id);
 const readingsOf = (id) => readings.filter((r) => r.bookId === id).sort((a, b) => (b.end || b.start || '9').localeCompare(a.end || a.start || '9'));
@@ -227,8 +228,11 @@ function viewAggiungi() {
 }
 function resultsHTML(list) {
   if (!list.length) return '<p class="sub">Nessun risultato. Prova con meno parole oppure inserisci il libro a mano.</p>';
-  return list.map((d, i) => `<button class="row" data-act="pick" data-i="${i}">${coverHTML(d)}
-    <div class="meta"><span class="t">${esc(d.title)}</span><span class="a">${esc(d.authors || 'Autore sconosciuto')}</span><span class="where">${esc([d.publisher, d.year].filter(Boolean).join(', '))}</span></div></button>`).join('');
+  const more = ui.search && !(ui.search.gDone && ui.search.olDone);
+  return `<p class="sub" style="margin:0 0 4px">${list.length} risultati. Non trovi il libro? Aggiungi l’autore o l’editore alla ricerca.</p>` +
+    list.map((d, i) => `<button class="row" data-act="pick" data-i="${i}">${coverHTML(d)}
+    <div class="meta"><span class="t">${esc(d.title)}</span><span class="a">${esc(d.authors || 'Autore sconosciuto')}</span><span class="where">${esc([d.publisher, d.year].filter(Boolean).join(', '))}</span></div></button>`).join('') +
+    (more ? '<button class="btn quiet block" data-act="more" style="margin-top:12px">Mostra altri risultati</button>' : '<p class="sub" style="margin-top:12px">Non ci sono altri risultati.</p>');
 }
 
 function viewForm(id) {
@@ -449,7 +453,7 @@ window.addEventListener('hashchange', () => { render(); window.scrollTo(0, 0); }
 
 // ---------- Ricerca online ----------
 const gKey = () => settings.googleKey ? '&key=' + encodeURIComponent(settings.googleKey) : '';
-const GENRE_MAP = [[/mystery|detective|crime|giall|polizies/i, 'Giallo'], [/thriller|suspense/i, 'Thriller'], [/noir/i, 'Noir'], [/fantasy/i, 'Fantasy'],
+const GENRE_MAP = [[/fiction \/ general|literary|narrativa/i, 'Narrativa'], [/mystery|detective|crime|giall|polizies/i, 'Giallo'], [/thriller|suspense/i, 'Thriller'], [/noir/i, 'Noir'], [/fantasy/i, 'Fantasy'],
   [/science fiction|fantascienza|sci-fi/i, 'Fantascienza'], [/horror/i, 'Horror'], [/histor|storic/i, 'Storico'], [/romance|love stor/i, 'Rosa'],
   [/classic/i, 'Classico'], [/adventure|avventur/i, 'Avventura'], [/humor|umoris/i, 'Umoristico'], [/biograph|autobiograph/i, 'Biografia'],
   [/poetry|poesi/i, 'Poesia'], [/juvenile|children|ragazzi|young adult/i, 'Ragazzi']];
@@ -490,23 +494,38 @@ async function lookupISBN(isbn) {
   } catch (e) { /* nessun risultato */ }
   return null;
 }
-async function searchBooks(q) {
-  let list = [], failures = 0;
-  try {
-    const r = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&maxResults=20&printType=books&country=IT${gKey()}`);
-    if (r.ok) list = ((await r.json()).items || []).map(fromGoogle); else failures++;
-  } catch (e) { failures++; }
-  if (list.length < 3) {
-    try {
-      const r = await fetch(`https://openlibrary.org/search.json?q=${encodeURIComponent(q)}&limit=20&fields=title,author_name,isbn,publisher,first_publish_year,cover_i,subject,number_of_pages_median`);
-      if (r.ok) {
-        const seen = new Set(list.map((d) => (d.title + d.authors).toLowerCase()));
-        ((await r.json()).docs || []).map(fromOpenLibrary).forEach((d) => { const k = (d.title + d.authors).toLowerCase(); if (!seen.has(k)) { seen.add(k); list.push(d); } });
-      } else failures++;
-    } catch (e) { failures++; }
+const PAGE = 20;
+const resKey = (d) => normKey(d.title) + '|' + normKey(String(d.authors || '').split(',')[0]);
+async function fetchGoogle(q, start) {
+  const r = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}&maxResults=${PAGE}&startIndex=${start}&printType=books&country=IT${gKey()}`);
+  if (!r.ok) throw new Error('google');
+  return ((await r.json()).items || []).map(fromGoogle);
+}
+async function fetchOL(q, offset) {
+  const r = await fetch(`https://openlibrary.org/search.json?q=${encodeURIComponent(q)}&limit=${PAGE}&offset=${offset}&fields=title,author_name,isbn,publisher,first_publish_year,cover_i,subject,number_of_pages_median`);
+  if (!r.ok) throw new Error('ol');
+  return ((await r.json()).docs || []).map(fromOpenLibrary);
+}
+// Prende la pagina successiva: prima da Google, poi (quando Google è finito o trova poco) da Open Library.
+async function nextResults(st) {
+  const fresh = [];
+  const add = (arr) => arr.forEach((d) => { const k = resKey(d); if (!st.seen.has(k)) { st.seen.add(k); fresh.push(d); } });
+  let failures = 0;
+  if (!st.gDone) {
+    try { const arr = await fetchGoogle(st.q, st.gIndex); st.gIndex += PAGE; if (arr.length < PAGE) st.gDone = true; add(arr); }
+    catch (e) { st.gDone = true; failures++; }
   }
-  if (!list.length && failures === 2) throw new Error('rete');
-  return list;
+  if (!st.olDone && fresh.length < 3) {
+    try { const arr = await fetchOL(st.q, st.olOffset); st.olOffset += PAGE; if (arr.length < PAGE) st.olDone = true; add(arr); }
+    catch (e) { st.olDone = true; failures++; }
+  }
+  if (!fresh.length && failures && st.first) throw new Error('rete');
+  st.first = false;
+  return fresh;
+}
+async function searchBooks(q) {
+  ui.search = { q, gIndex: 0, olOffset: 0, gDone: false, olDone: false, seen: new Set(), first: true };
+  return nextResults(ui.search);
 }
 function fromOpenLibrary(doc) {
   const isbns = doc.isbn || [];
@@ -839,6 +858,13 @@ document.addEventListener('click', async (e) => {
     case 'import': $('#importfile').click(); break;
     case 'importlist': $('#importlist').click(); break;
     case 'template': downloadTemplate(); break;
+    case 'more': {
+      if (!ui.search) break;
+      el.disabled = true; el.textContent = 'Cerco…';
+      try { const add = await nextResults(ui.search); ui.results.push(...add); } catch (err) { ui.search.gDone = ui.search.olDone = true; }
+      const box = $('#results'); if (box) box.innerHTML = resultsHTML(ui.results);
+      break;
+    }
     case 'palette': settings.palette = d.v; if (settings.mode === 'scura' && d.v !== 'notte') settings.mode = 'chiara'; saveSettings(); applyTheme(); render(); break;
     case 'mode': settings.mode = d.v; saveSettings(); applyTheme(); render(); break;
     case 'togglekey': { const i = $('#gkey'); const show = i.type === 'password'; i.type = show ? 'text' : 'password'; el.textContent = show ? 'Nascondi' : 'Mostra'; break; }
