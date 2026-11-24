@@ -30,3 +30,4 @@ Carica di nuovo i file modificati nel repository. In `sw.js` aumenta il numero i
 ## Backup
 
 Dal tab **Dati** scarica ogni tanto il backup JSON e salvalo su Google Drive. Con **Ripristina da un backup** lo ricarichi, anche su un telefono nuovo. L'app ti avvisa se l'ultimo backup ha più di 30 giorni.
+
